@@ -5,11 +5,14 @@ from fastapi import HTTPException, status
 
 from app.config import settings
 from app.schemas import (
+    DeleteItemResponse,
     IoDeleteListResponse,
     IoListResponse,
     IoUserResponse,
+    ItemResponse,
     ListMemberResponse,
     ShareListResponse,
+    VerifyListAccessResponse,
 )
 
 
@@ -197,3 +200,31 @@ async def get_list_members(list_id: UUID, requester_id: UUID) -> list[ListMember
         )
 
     return [ListMemberResponse.model_validate(item) for item in response.json()]
+
+
+async def verify_list_access(list_id: UUID, user_id: UUID) -> VerifyListAccessResponse:
+    async with httpx.AsyncClient(base_url=settings.io_service_url, timeout=10.0) as client:
+        response = await client.get(
+            f"/internal/access/lists/{list_id}",
+            params={"user_id": str(user_id)},
+        )
+
+    if response.status_code == status.HTTP_404_NOT_FOUND:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="List not found",
+        )
+
+    if response.status_code == status.HTTP_403_FORBIDDEN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have access to this list",
+        )
+
+    if response.is_error:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="IO service failed to verify list access",
+        )
+
+    return VerifyListAccessResponse.model_validate(response.json())
