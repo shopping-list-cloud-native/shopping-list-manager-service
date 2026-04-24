@@ -1,6 +1,7 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
+from datetime import datetime
 
 from app.clients.budget_service import get_budget, recalculate_budget
 from app.clients.io_service import (
@@ -206,3 +207,47 @@ async def update_budget_endpoint(
     )
     budget = await recalculate_budget(list_id)
     return BudgetStatusResponse.model_validate(budget.model_dump())
+
+
+@router.get("/lists/summary", response_model=dict)
+async def get_lists_summary(
+    current_user: ValidateTokenResponse = Depends(get_current_user),
+) -> dict:
+
+    items = await get_lists(current_user.user_id)
+    total_lists = len(items)
+    total_budget = sum(item.max_budget for item in items)
+    
+    return {
+        "user_id": current_user.user_id,
+        "total_active_lists": total_lists,
+        "combined_max_budget": total_budget,
+        "timestamp": datetime.now()
+    }
+
+@router.get("/lists/search", response_model=list[ListResponse])
+async def search_lists_by_name(
+    query: str,
+    current_user: ValidateTokenResponse = Depends(get_current_user),
+) -> list[ListResponse]:
+
+    all_lists = await get_lists(current_user.user_id)
+    filtered = [l for l in all_lists if query.lower() in l.name.lower()]
+    return [ListResponse.model_validate(item.model_dump()) for item in filtered]
+
+@router.get("/lists/{list_id}/audit", tags=["audit"])
+async def get_list_audit_log(
+    list_id: UUID,
+    current_user: ValidateTokenResponse = Depends(get_current_user),
+):
+
+    access = await verify_list_access(list_id=list_id, user_id=current_user.user_id)
+    return {
+        "list_id": list_id,
+        "requester": current_user.email,
+        "role_at_access": access.role,
+        "access_granted": True,
+        "audit_status": "logging_enabled"
+    }
+
+# ----------------------------------------
