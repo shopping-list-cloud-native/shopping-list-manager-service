@@ -5,11 +5,14 @@ from datetime import datetime
 
 from app.clients.budget_service import get_budget, recalculate_budget
 from app.clients.io_service import (
+    get_accessible_lists,
     create_list,
     delete_list,
     get_list_members,
     get_lists,
     get_user_by_email,
+    leave_list,
+    remove_list_member,
     share_list,
     update_list,
     verify_list_access,
@@ -20,7 +23,7 @@ from app.clients.items_service import (
     get_items,
     update_item,
 )
-from app.clients.notification_service import create_notification, get_notifications
+from app.clients.notification_service import create_notification, get_notifications, mark_notification_as_read
 from app.dependencies import get_current_user
 from app.schemas import (
     CreateItemRequest,
@@ -31,6 +34,7 @@ from app.schemas import (
     ItemResponse,
     ListResponse,
     ListMemberResponse,
+    MembershipActionResponse,
     NotificationResponse,
     ShareListRequest,
     ShareListResponse,
@@ -57,6 +61,14 @@ async def get_lists_endpoint(
     current_user: ValidateTokenResponse = Depends(get_current_user),
 ) -> list[ListResponse]:
     items = await get_lists(current_user.user_id)
+    return [ListResponse.model_validate(item.model_dump()) for item in items]
+
+
+@router.get("/lists/accessible", response_model=list[ListResponse])
+async def get_accessible_lists_endpoint(
+    current_user: ValidateTokenResponse = Depends(get_current_user),
+) -> list[ListResponse]:
+    items = await get_accessible_lists(current_user.user_id)
     return [ListResponse.model_validate(item.model_dump()) for item in items]
 
 
@@ -113,6 +125,32 @@ async def get_list_members_endpoint(
 ) -> list[ListMemberResponse]:
     members = await get_list_members(list_id=list_id, requester_id=current_user.user_id)
     return [ListMemberResponse.model_validate(item.model_dump()) for item in members]
+
+
+@router.delete("/lists/{list_id}/members/{user_id}", response_model=MembershipActionResponse)
+async def remove_list_member_endpoint(
+    list_id: UUID,
+    user_id: UUID,
+    current_user: ValidateTokenResponse = Depends(get_current_user),
+) -> MembershipActionResponse:
+    removed = await remove_list_member(
+        list_id=list_id,
+        owner_id=current_user.user_id,
+        user_id=user_id,
+    )
+    return MembershipActionResponse.model_validate(removed.model_dump())
+
+
+@router.delete("/lists/{list_id}/leave", response_model=MembershipActionResponse)
+async def leave_list_endpoint(
+    list_id: UUID,
+    current_user: ValidateTokenResponse = Depends(get_current_user),
+) -> MembershipActionResponse:
+    left = await leave_list(
+        list_id=list_id,
+        requester_id=current_user.user_id,
+    )
+    return MembershipActionResponse.model_validate(left.model_dump())
 
 
 @router.post("/lists/{list_id}/items", response_model=ItemResponse, status_code=status.HTTP_201_CREATED)
@@ -191,6 +229,15 @@ async def get_notifications_endpoint(
 ) -> list[NotificationResponse]:
     notifications = await get_notifications(current_user.user_id)
     return [NotificationResponse.model_validate(item.model_dump()) for item in notifications]
+
+
+@router.patch("/notifications/{notification_id}", response_model=NotificationResponse)
+async def mark_notification_read_endpoint(
+    notification_id: UUID,
+    current_user: ValidateTokenResponse = Depends(get_current_user),
+) -> NotificationResponse:
+    notification = await mark_notification_as_read(notification_id)
+    return NotificationResponse.model_validate(notification.model_dump())
 
 
 @router.patch("/lists/{list_id}/budget", response_model=BudgetStatusResponse)

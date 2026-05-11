@@ -38,3 +38,16 @@ async def get_notifications(user_id: UUID) -> list[NotificationResponse]:
         )
 
     return [NotificationResponse.model_validate(item) for item in response.json()]
+
+
+async def mark_notification_as_read(notification_id: UUID) -> NotificationResponse:
+    async with httpx.AsyncClient(base_url=settings.notification_service_url, timeout=10.0) as client:
+        response = await client.patch(f"/internal/notifications/{notification_id}")
+
+    if response.is_error:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Notification service failed to mark notification as read",
+        )
+
+    return NotificationResponse.model_validate(response.json())

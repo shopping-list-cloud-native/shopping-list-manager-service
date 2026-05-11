@@ -11,6 +11,7 @@ from app.schemas import (
     IoUserResponse,
     ItemResponse,
     ListMemberResponse,
+    MembershipActionResponse,
     ShareListResponse,
     VerifyListAccessResponse,
 )
@@ -69,6 +70,19 @@ async def get_lists(owner_id: UUID) -> list[IoListResponse]:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="IO service failed to fetch lists",
+        )
+
+    return [IoListResponse.model_validate(item) for item in response.json()]
+
+
+async def get_accessible_lists(user_id: UUID) -> list[IoListResponse]:
+    async with httpx.AsyncClient(base_url=settings.io_service_url, timeout=10.0) as client:
+        response = await client.get("/internal/lists/accessible", params={"user_id": str(user_id)})
+
+    if response.is_error:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="IO service failed to fetch accessible lists",
         )
 
     return [IoListResponse.model_validate(item) for item in response.json()]
@@ -200,6 +214,52 @@ async def get_list_members(list_id: UUID, requester_id: UUID) -> list[ListMember
         )
 
     return [ListMemberResponse.model_validate(item) for item in response.json()]
+
+
+async def remove_list_member(list_id: UUID, owner_id: UUID, user_id: UUID) -> MembershipActionResponse:
+    async with httpx.AsyncClient(base_url=settings.io_service_url, timeout=10.0) as client:
+        response = await client.delete(
+            f"/internal/list-members/by-list/{list_id}/members/{user_id}",
+            params={"owner_id": str(owner_id)},
+        )
+
+    if response.status_code == status.HTTP_404_NOT_FOUND:
+        detail = response.json().get("detail", "List member not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=detail,
+        )
+
+    if response.is_error:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="IO service failed to remove list member",
+        )
+
+    return MembershipActionResponse.model_validate(response.json())
+
+
+async def leave_list(list_id: UUID, requester_id: UUID) -> MembershipActionResponse:
+    async with httpx.AsyncClient(base_url=settings.io_service_url, timeout=10.0) as client:
+        response = await client.delete(
+            f"/internal/list-members/by-list/{list_id}/leave",
+            params={"requester_id": str(requester_id)},
+        )
+
+    if response.status_code in {status.HTTP_404_NOT_FOUND, status.HTTP_400_BAD_REQUEST}:
+        detail = response.json().get("detail", "Unable to leave list")
+        raise HTTPException(
+            status_code=response.status_code,
+            detail=detail,
+        )
+
+    if response.is_error:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="IO service failed to leave list",
+        )
+
+    return MembershipActionResponse.model_validate(response.json())
 
 
 async def verify_list_access(list_id: UUID, user_id: UUID) -> VerifyListAccessResponse:
