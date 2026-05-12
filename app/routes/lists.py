@@ -1,12 +1,15 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from datetime import datetime
 
 from app.clients.budget_service import get_budget, recalculate_budget
 from app.clients.io_service import (
+    create_comment,
     get_accessible_lists,
+    get_comments,
     create_list,
+    delete_comment,
     delete_list,
     get_list_members,
     get_lists,
@@ -15,12 +18,15 @@ from app.clients.io_service import (
     remove_list_member,
     share_list,
     update_list,
+    update_comment,
     verify_list_access,
 )
 from app.clients.items_service import (
+    bulk_check_items,
     create_item,
     delete_item,
     get_items,
+    get_spending_analysis,
     update_item,
 )
 from app.clients.notification_service import create_notification, get_notifications, mark_notification_as_read
@@ -29,6 +35,11 @@ from app.schemas import (
     CreateItemRequest,
     CreateListRequest,
     BudgetStatusResponse,
+    BulkCheckItemsResponse,
+    CommentActionResponse,
+    CommentResponse,
+    CreateCommentRequest,
+    UpdateCommentRequest,
     DeleteItemResponse,
     DeleteListResponse,
     ItemResponse,
@@ -38,6 +49,7 @@ from app.schemas import (
     NotificationResponse,
     ShareListRequest,
     ShareListResponse,
+    SpendingAnalysisResponse,
     UpdateItemRequest,
     UpdateBudgetRequest,
     UpdateListRequest,
@@ -213,6 +225,28 @@ async def delete_item_endpoint(
     return DeleteItemResponse.model_validate(deleted.model_dump())
 
 
+@router.post("/lists/{list_id}/items/bulk-check", response_model=BulkCheckItemsResponse)
+async def bulk_check_items_endpoint(
+    list_id: UUID,
+    checked: bool = True,
+    current_user: ValidateTokenResponse = Depends(get_current_user),
+) -> BulkCheckItemsResponse:
+    access = await verify_list_access(list_id=list_id, user_id=current_user.user_id)
+    if access.role == "viewer":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Viewer cannot modify items in this list",
+        )
+
+    result = await bulk_check_items(
+        list_id=list_id,
+        checked=checked,
+        actor_user_id=current_user.user_id,
+        actor_email=current_user.email,
+    )
+    return BulkCheckItemsResponse.model_validate(result.model_dump())
+
+
 @router.get("/lists/{list_id}/budget", response_model=BudgetStatusResponse)
 async def get_budget_endpoint(
     list_id: UUID,
@@ -221,6 +255,108 @@ async def get_budget_endpoint(
     await verify_list_access(list_id=list_id, user_id=current_user.user_id)
     budget = await get_budget(list_id)
     return BudgetStatusResponse.model_validate(budget.model_dump())
+
+
+@router.get("/lists/{list_id}/spending-analysis", response_model=SpendingAnalysisResponse)
+async def get_spending_analysis_endpoint(
+    list_id: UUID,
+    current_user: ValidateTokenResponse = Depends(get_current_user),
+) -> SpendingAnalysisResponse:
+    await verify_list_access(list_id=list_id, user_id=current_user.user_id)
+    analysis = await get_spending_analysis(list_id)
+    return SpendingAnalysisResponse.model_validate(analysis.model_dump())
+
+
+@router.post("/lists/{list_id}/comments", response_model=CommentResponse, status_code=status.HTTP_201_CREATED)
+async def create_comment_endpoint(
+    payload: CreateCommentRequest,
+    list_id: UUID,
+    current_user: ValidateTokenResponse = Depends(get_current_user),
+) -> CommentResponse:
+    await verify_list_access(list_id=list_id, user_id=current_user.user_id)
+    created = await create_comment(
+        list_id=list_id,
+        user_id=current_user.user_id,
+        content=payload.content,
+        x_percent=payload.x_percent,
+        y_percent=payload.y_percent,
+        width_percent=payload.width_percent,
+        height_percent=payload.height_percent,
+    )
+    return CommentResponse.model_validate(created.model_dump())
+
+
+@router.get("/lists/{list_id}/comments", response_model=list[CommentResponse])
+async def get_comments_endpoint(
+    list_id: UUID,
+    current_user: ValidateTokenResponse = Depends(get_current_user),
+) -> list[CommentResponse]:
+    await verify_list_access(list_id=list_id, user_id=current_user.user_id)
+    comments = await get_comments(list_id=list_id)
+    return [CommentResponse.model_validate(item.model_dump()) for item in comments]
+
+
+@router.delete("/lists/{list_id}/comments/{comment_id}", response_model=CommentActionResponse)
+async def delete_comment_endpoint(
+    list_id: UUID,
+    comment_id: UUID,
+    current_user: ValidateTokenResponse = Depends(get_current_user),
+) -> CommentActionResponse:
+    access = await verify_list_access(list_id=list_id, user_id=current_user.user_id)
+    comments = await get_comments(list_id=list_id)
+    matched_comment = next((comment for comment in comments if comment.id == comment_id), None)
+    if matched_comment is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Comment not found",
+        )
+    # allow delete if user is author OR has owner/editor role on the list
+    is_author = matched_comment.user_id == current_user.user_id
+    can_edit = access.role in ("owner", "editor")
+    if not is_author and not can_edit:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to delete this comment",
+        )
+
+    deleted = await delete_comment(comment_id=comment_id)
+    return CommentActionResponse.model_validate(deleted.model_dump())
+
+
+@router.patch("/lists/{list_id}/comments/{comment_id}", response_model=CommentResponse)
+async def update_comment_endpoint(
+    payload: UpdateCommentRequest,
+    list_id: UUID,
+    comment_id: UUID,
+    current_user: ValidateTokenResponse = Depends(get_current_user),
+) -> CommentResponse:
+    access = await verify_list_access(list_id=list_id, user_id=current_user.user_id)
+    comments = await get_comments(list_id=list_id)
+    matched_comment = next((comment for comment in comments if comment.id == comment_id), None)
+    if matched_comment is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Comment not found",
+        )
+    # allow update if user is author OR has owner/editor role on the list
+    is_author = matched_comment.user_id == current_user.user_id
+    can_edit = access.role in ("owner", "editor")
+    if not is_author and not can_edit:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to update this comment",
+        )
+
+    updated = await update_comment(
+        comment_id=comment_id,
+        content=payload.content,
+        x_percent=payload.x_percent,
+        y_percent=payload.y_percent,
+        width_percent=payload.width_percent,
+        height_percent=payload.height_percent,
+        user_id=payload.user_id if hasattr(payload, 'user_id') else None,
+    )
+    return CommentResponse.model_validate(updated.model_dump())
 
 
 @router.get("/notifications", response_model=list[NotificationResponse])

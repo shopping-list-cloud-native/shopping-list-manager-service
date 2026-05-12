@@ -107,6 +107,24 @@ class DeleteItemResponse(BaseModel):
     message: str
 
 
+class BulkCheckItemsResponse(BaseModel):
+    message: str
+    status: str
+
+
+class MostExpensiveItemResponse(BaseModel):
+    name: str
+    price: Decimal
+
+
+class SpendingAnalysisResponse(BaseModel):
+    total_items: int
+    total_list_value: Decimal = Decimal("0")
+    average_item_price: Decimal = Decimal("0")
+    most_expensive_item: MostExpensiveItemResponse | None = None
+    currency: str = "RON"
+
+
 class BudgetStatusResponse(BaseModel):
     list_id: UUID
     max_budget: Decimal
@@ -126,3 +144,37 @@ class NotificationResponse(BaseModel):
     message: str
     read: bool
     created_at: datetime
+
+
+class CreateCommentRequest(BaseModel):
+    content: str
+    x_percent: Decimal
+    y_percent: Decimal
+    width_percent: Decimal
+    height_percent: Decimal
+
+
+class UpdateCommentRequest(BaseModel):
+    content: str | None = None
+    x_percent: Decimal | None = None
+    y_percent: Decimal | None = None
+    width_percent: Decimal | None = None
+    height_percent: Decimal | None = None
+    user_id: UUID | None = None
+
+
+class CommentResponse(BaseModel):
+    id: UUID
+    list_id: UUID
+    user_id: UUID
+    content: str
+    x_percent: Decimal
+    y_percent: Decimal
+    width_percent: Decimal
+    height_percent: Decimal
+    created_at: datetime
+    updated_at: datetime
+
+
+class CommentActionResponse(BaseModel):
+    message: str

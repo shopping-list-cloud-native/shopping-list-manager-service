@@ -4,7 +4,7 @@ import httpx
 from fastapi import HTTPException, status
 
 from app.config import settings
-from app.schemas import DeleteItemResponse, ItemResponse
+from app.schemas import BulkCheckItemsResponse, DeleteItemResponse, ItemResponse, SpendingAnalysisResponse
 
 
 def _serialize_decimal(value: str | int | float | None) -> str | int | float | None:
@@ -120,3 +120,43 @@ async def delete_item(list_id: UUID, item_id: UUID) -> DeleteItemResponse:
         )
 
     return DeleteItemResponse.model_validate(response.json())
+
+
+async def bulk_check_items(
+    list_id: UUID,
+    checked: bool,
+    actor_user_id: UUID,
+    actor_email: str,
+) -> BulkCheckItemsResponse:
+    async with httpx.AsyncClient(base_url=settings.items_service_url, timeout=10.0) as client:
+        response = await client.post(
+            f"/internal/lists/{list_id}/items/bulk-check",
+            headers={
+                "X-User-Id": str(actor_user_id),
+                "X-User-Email": actor_email,
+            },
+            params={
+                "checked": str(checked).lower(),
+            },
+        )
+
+    if response.is_error:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Items service failed to update items in bulk",
+        )
+
+    return BulkCheckItemsResponse.model_validate(response.json())
+
+
+async def get_spending_analysis(list_id: UUID) -> SpendingAnalysisResponse:
+    async with httpx.AsyncClient(base_url=settings.items_service_url, timeout=10.0) as client:
+        response = await client.get(f"/internal/lists/{list_id}/items/spending-analysis")
+
+    if response.is_error:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Items service failed to fetch spending analysis",
+        )
+
+    return SpendingAnalysisResponse.model_validate(response.json())
