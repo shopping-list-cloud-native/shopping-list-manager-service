@@ -34,7 +34,7 @@ async def get_user_by_email(email: str) -> IoUserResponse:
     if response.status_code == status.HTTP_404_NOT_FOUND:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Invited user is not found",
+            detail="Invited user was not found",
         )
 
     if response.is_error:
